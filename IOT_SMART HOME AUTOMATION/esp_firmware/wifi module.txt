@@ -1,0 +1,185 @@
+[cite_start]// [cite: 163-166]
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+#include <SoftwareSerial.h>
+
+// --- Configuration ---
+const char* ssid = "Unifi";         [cite_start]// [cite: 167]
+const char* password = "99990000";  [cite_start]// [cite: 168]
+const int port = 80;
+
+[cite_start]// Software Serial to communicate with Arduino (D2=RX, D3=TX) [cite: 178]
+SoftwareSerial arduinoSerial(D2, D3); 
+ESP8266WebServer server(port);
+
+// --- Global Variables ---
+[cite_start]// [cite: 179-185]
+String timeStamp = "N/A";
+String temperature = "N/A";
+String humidity = "N/A";
+String gasValue = "N/A";
+String flameValue = "N/A";
+String lightValue = "N/A";
+String latestAlert = "";
+String doorStatus = "Locked";
+
+// --- HTML Pages (Stored as Raw Strings for cleanliness) ---
+
+// Automation Control Page
+const char* automation_html = R"====(
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Automation</title>
+  <style>
+    body { font-family: Arial; text-align: center; margin: 20px; }
+    .btn { display: inline-block; padding: 10px 20px; margin: 10px; color: white; border-radius: 5px; text-decoration: none; }
+    .on { background-color: #28a745; }
+    .off { background-color: #dc3545; }
+  </style>
+</head>
+<body>
+  <h1>Home Automation</h1>
+  <div>
+    <h3>Light 1</h3>
+    <a href="/command?command=light1_on" class="btn on">ON</a>
+    <a href="/command?command=light1_off" class="btn off">OFF</a>
+  </div>
+  <div>
+    <h3>Fan</h3>
+    <a href="/command?command=fan_on" class="btn on">ON</a>
+    <a href="/command?command=fan_off" class="btn off">OFF</a>
+  </div>
+  <div>
+    <h3>Exhaust</h3>
+    <a href="/command?command=exhaust_on" class="btn on">ON</a>
+    <a href="/command?command=exhaust_off" class="btn off">OFF</a>
+  </div>
+  <div>
+    <h3>Light 2</h3>
+    <a href="/command?command=light_on" class="btn on">ON</a>
+    <a href="/command?command=light_off" class="btn off">OFF</a>
+  </div>
+  <p><a href="/">Back to Menu</a></p>
+</body>
+</html>
+)====";
+
+// --- Setup & Loop ---
+
+void setup() {
+  Serial.begin(9600);       // Debugging
+  arduinoSerial.begin(9600); [cite_start]// Communication with Arduino [cite: 297]
+  
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi Connected!");
+  Serial.println(WiFi.localIP()); [cite_start]// Print IP to Serial Monitor [cite: 298]
+
+  [cite_start]// Define URL Handlers [cite: 298]
+  server.on("/", handleRoot);
+  server.on("/command", handleCommand);
+  server.on("/sensors", handleSensorData); // App fetches data here
+  server.on("/automation", handleAutomation);
+  server.on("/door", handleDoor);
+  
+  server.begin();
+  Serial.println("Server started");
+}
+
+void loop() {
+  server.handleClient(); [cite_start]// Handle Web Requests [cite: 298]
+  
+  [cite_start]// Read Data from Arduino [cite: 298]
+  if (arduinoSerial.available() > 0) {
+    String receivedData = arduinoSerial.readStringUntil('\n');
+    receivedData.trim();
+    
+    if (receivedData.startsWith("ALERT:")) {
+       latestAlert = receivedData;
+       Serial.println("ALERT RECEIVED: " + receivedData);
+    } else {
+       parseSensorData(receivedData);
+    }
+  }
+}
+
+// --- Handlers ---
+
+void handleRoot() {
+  [cite_start]// [cite: 273-282]
+  String html = "<!DOCTYPE html><html><head><title>Smart Home</title>";
+  html += "<meta http-equiv='refresh' content='5'></head><body>";
+  html += "<h1>Smart Home Dashboard</h1>";
+  
+  if (latestAlert != "") {
+    html += "<div style='color:red; font-weight:bold;'>" + latestAlert + "</div><br>";
+  }
+  
+  html += "<p><b>Temp:</b> " + temperature + " C</p>";
+  html += "<p><b>Humidity:</b> " + humidity + " %</p>";
+  html += "<p><b>Gas Level:</b> " + gasValue + "</p>";
+  html += "<p><b>Door:</b> " + doorStatus + "</p>";
+  
+  html += "<p><a href='/automation'>Control Appliances</a> | ";
+  html += "<a href='/door'>Door Control</a></p>";
+  html += "</body></html>";
+  
+  server.send(200, "text/html", html);
+}
+
+void handleCommand() {
+  [cite_start]// [cite: 285-296]
+  String command = server.arg("command");
+  Serial.println("Command Received: " + command);
+  arduinoSerial.println(command); // Forward to Arduino
+  
+  if (command == "unlock_door") doorStatus = "Unlocked";
+  else if (command == "lock_door") doorStatus = "Locked";
+  
+  server.sendHeader("Location", "/automation"); // Redirect back
+  server.send(303);
+}
+
+void handleSensorData() {
+  [cite_start]// Returns raw CSV data for the Mobile App or fetch API [cite: 211]
+  String data = temperature + "," + humidity + "," + gasValue + "," + flameValue + "," + lightValue;
+  server.send(200, "text/plain", data);
+}
+
+void handleAutomation() {
+  server.send(200, "text/html", automation_html);
+}
+
+void handleDoor() {
+  [cite_start]// [cite: 227-231]
+  String html = "<html><body><h1>Door Control</h1>";
+  html += "<h3>Status: " + doorStatus + "</h3>";
+  html += "<a href='/command?command=unlock_door'><button>UNLOCK</button></a><br><br>";
+  html += "<a href='/command?command=lock_door'><button>LOCK</button></a>";
+  html += "<p><a href='/'>Back</a></p></body></html>";
+  server.send(200, "text/html", html);
+}
+
+void parseSensorData(String data) {
+  [cite_start]// [cite: 232-261]
+  // Expected Format: Time,Temp,Hum,Gas,Flame,Light
+  int comma1 = data.indexOf(',');
+  int comma2 = data.indexOf(',', comma1 + 1);
+  int comma3 = data.indexOf(',', comma2 + 1);
+  int comma4 = data.indexOf(',', comma3 + 1);
+  int comma5 = data.indexOf(',', comma4 + 1);
+
+  if (comma1 != -1 && comma5 != -1) {
+    timeStamp = data.substring(0, comma1);
+    temperature = data.substring(comma1 + 1, comma2);
+    humidity = data.substring(comma2 + 1, comma3);
+    gasValue = data.substring(comma3 + 1, comma4);
+    flameValue = data.substring(comma4 + 1, comma5);
+    lightValue = data.substring(comma5 + 1);
+  }
+}

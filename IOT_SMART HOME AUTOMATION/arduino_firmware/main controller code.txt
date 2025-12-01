@@ -1,0 +1,277 @@
+[cite_start]// [cite: 71-75]
+#include <DHT.h>
+#include <LiquidCrystal_I2C.h>
+#include <Servo.h>
+#include <Keypad.h>
+
+// --- Configuration & Pin Definitions ---
+[cite_start]// [cite: 106-108]
+#define LCD_ADDR 0x27 
+#define LCD_COLS 16
+#define LCD_ROWS 2
+
+[cite_start]// [cite: 80, 83, 85, 87, 89, 95]
+#define DHTPIN 2
+#define DHTTYPE DHT22
+#define MQ2PIN A0
+#define FLAMEPIN 3
+#define LDRPIN A1
+#define SERVO_PIN 9
+
+[cite_start]// Relay & Buzzer Pins [cite: 90-94]
+#define RELAY1 4  // Light 1
+#define RELAY2 5  // Fan
+#define RELAY3 6  // Exhaust Fan
+#define RELAY4 7  // Light 2
+#define BUZZER 8
+
+// --- Global Objects ---
+LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
+DHT dht(DHTPIN, DHTTYPE);
+Servo doorServo;
+
+// --- Keypad Setup ---
+[cite_start]// [cite: 77-88, 96-99]
+const byte ROWS = 4; // Updated to 4 to match standard keypads
+const byte COLS = 3; 
+char keys[ROWS][COLS] = {
+  {'1', '2', '3'},
+  {'4', '5', '6'},
+  {'7', '8', '9'},
+  {'*', '0', '#'} // Assuming standard layout based on context
+};
+byte rowPins[ROWS] = {10, 11, 12, A4}; // Ensure you map these to your actual wiring
+byte colPins[COLS] = {13, A2, A3};
+Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
+
+// --- Variables ---
+[cite_start]// [cite: 101-118]
+int flameValue;
+int ldrValue;
+int mq2Value;
+String dataString = "";
+char incomingByte;
+
+String password = "1234";
+String enteredPassword = "";
+bool doorOpen = false;
+bool gasDetected = false;
+bool buzzerActive = false;
+unsigned long buzzerStartTime = 0;
+const unsigned long buzzerDuration = 5000;
+bool showSensorData = false;
+bool alertSent = false;
+
+void setup() {
+  Serial.begin(9600); [cite_start]// Communication with NodeMCU [cite: 119]
+  
+  [cite_start]// Pin Modes [cite: 119]
+  pinMode(RELAY1, OUTPUT);
+  pinMode(RELAY2, OUTPUT);
+  pinMode(RELAY3, OUTPUT);
+  pinMode(RELAY4, OUTPUT);
+  pinMode(BUZZER, OUTPUT);
+  pinMode(FLAMEPIN, INPUT);
+  pinMode(LDRPIN, INPUT);
+  pinMode(MQ2PIN, INPUT);
+
+  // Initial State (Relays HIGH usually means OFF for relay modules)
+  digitalWrite(RELAY1, HIGH);
+  digitalWrite(RELAY2, HIGH);
+  digitalWrite(RELAY3, HIGH);
+  digitalWrite(RELAY4, HIGH);
+  digitalWrite(BUZZER, LOW);
+
+  dht.begin();
+  lcd.init();
+  lcd.backlight();
+  lcd.print("Smart Home");
+  lcd.setCursor(0, 1);
+  lcd.print("System Online");
+  delay(2000);
+  
+  doorServo.attach(SERVO_PIN);
+  doorServo.write(90); // Locked position
+  
+  lcd.clear();
+  lcd.print("Enter Password:");
+}
+
+void loop() {
+  [cite_start]// 1. Check for incoming commands from NodeMCU [cite: 119]
+  while (Serial.available() > 0) {
+    incomingByte = Serial.read();
+    if (incomingByte == '\n') { // End of command
+      dataString.trim();
+      processCommand(dataString);
+      dataString = "";
+    } else {
+      dataString += incomingByte;
+    }
+  }
+
+  [cite_start]// 2. Read Sensors & Handle Logic [cite: 119]
+  readSensors();
+  checkAndSendAlerts();
+  controlBuzzerAndExhaust();
+  sendSensorData(); // Send data to NodeMCU
+  
+  [cite_start]// 3. Keypad Logic [cite: 119]
+  char key = keypad.getKey();
+  if (key) {
+    handleKeypadInput(key);
+  }
+
+  [cite_start]// 4. LCD Display Update [cite: 119]
+  if (showSensorData) {
+    displaySensorData();
+  } else {
+    // Keep showing door status or password entry
+  }
+  
+  [cite_start]// Buzzer Timer Logic [cite: 125]
+  if (buzzerActive && (millis() - buzzerStartTime < buzzerDuration)) {
+    digitalWrite(BUZZER, HIGH);
+  } else if (!gasDetected && flameValue == HIGH) { // Only turn off if no active danger
+     digitalWrite(BUZZER, LOW);
+     buzzerActive = false;
+     alertSent = false;
+  }
+}
+
+// --- Helper Functions ---
+
+void processCommand(String command) {
+  [cite_start]// [cite: 133-154]
+  if (command == "light1_on") { digitalWrite(RELAY1, LOW); Serial.println("Light 1 ON"); }
+  else if (command == "light1_off") { digitalWrite(RELAY1, HIGH); Serial.println("Light 1 OFF"); }
+  else if (command == "fan_on") { digitalWrite(RELAY2, LOW); Serial.println("Fan ON"); }
+  else if (command == "fan_off") { digitalWrite(RELAY2, HIGH); Serial.println("Fan OFF"); }
+  else if (command == "exhaust_on") { digitalWrite(RELAY3, LOW); Serial.println("Exhaust Fan ON"); }
+  else if (command == "exhaust_off") { digitalWrite(RELAY3, HIGH); Serial.println("Exhaust Fan OFF"); }
+  else if (command == "light_on") { digitalWrite(RELAY4, LOW); Serial.println("Light ON"); }
+  else if (command == "light_off") { digitalWrite(RELAY4, HIGH); Serial.println("Light OFF"); }
+  else if (command == "buzzer_on") { digitalWrite(BUZZER, HIGH); buzzerActive = true; buzzerStartTime = millis(); }
+  else if (command == "buzzer_off") { digitalWrite(BUZZER, LOW); buzzerActive = false; }
+  else if (command == "unlock_door") { 
+    doorServo.write(180); 
+    doorOpen = true; 
+    lcd.clear(); lcd.print("Door Unlocked"); 
+    showSensorData = true; 
+  }
+  else if (command == "lock_door") { 
+    doorServo.write(90); 
+    doorOpen = false; 
+    lcd.clear(); lcd.print("Door Locked"); 
+    delay(2000); lcd.clear(); lcd.print("Enter Password:");
+    showSensorData = false; 
+  }
+  else if (command == "reset") { resetSystem(); }
+}
+
+void readSensors() {
+  [cite_start]// [cite: 160]
+  float h = dht.readHumidity();
+  float t = dht.readTemperature();
+  mq2Value = analogRead(MQ2PIN);
+  flameValue = digitalRead(FLAMEPIN);
+  ldrValue = analogRead(LDRPIN);
+
+  if (isnan(t) || isnan(h)) { Serial.println("DHT Read Failed"); return; }
+  
+  [cite_start]// Auto Light Control (LDR) [cite: 159-160]
+  if (ldrValue < 500) {
+    digitalWrite(RELAY1, LOW); // Auto ON in dark
+  }
+}
+
+void checkAndSendAlerts() {
+  [cite_start]// [cite: 160]
+  if (flameValue == LOW && !alertSent) { // Flame sensor usually LOW on detection
+    Serial.println("ALERT: Flame Detected!");
+    alertSent = true;
+  }
+  if (mq2Value > 250 && !alertSent) {
+    Serial.println("ALERT: Gas Detected!");
+    alertSent = true;
+  }
+}
+
+void controlBuzzerAndExhaust() {
+  [cite_start]// [cite: 160-161]
+  if (flameValue == LOW || mq2Value > 300) {
+    if (!buzzerActive) {
+      digitalWrite(BUZZER, HIGH);
+      buzzerActive = true;
+      buzzerStartTime = millis();
+    }
+  }
+  
+  if (mq2Value > 100) {
+    digitalWrite(RELAY3, LOW); // Exhaust ON
+    gasDetected = true;
+  } else if (gasDetected) {
+    digitalWrite(RELAY3, HIGH); // Exhaust OFF
+    gasDetected = false;
+  }
+}
+
+void sendSensorData() {
+  [cite_start]// [cite: 160]
+  float ldrPercentage = (100.0 - (ldrValue * 100.0 / 1023.0));
+  String data = String(millis()) + "," + String(dht.readTemperature()) + "," + 
+                String(dht.readHumidity()) + "," + String(mq2Value) + "," + 
+                String(flameValue) + "," + String(ldrPercentage);
+  Serial.println(data);
+  delay(1000); // Prevent flooding serial
+}
+
+void handleKeypadInput(char key) {
+  [cite_start]// [cite: 161]
+  if (key >= '0' && key <= '9') {
+    enteredPassword += key;
+    lcd.setCursor(0, 1);
+    lcd.print(enteredPassword);
+  } else if (key == '*') {
+    enteredPassword = "";
+    lcd.clear();
+    lcd.print("Enter Password:");
+  }
+  
+  if (enteredPassword.length() >= password.length()) {
+    if (enteredPassword == password) {
+       lcd.clear(); lcd.print("Correct Password");
+       doorServo.write(180);
+       doorOpen = true;
+       showSensorData = true;
+    } else {
+       lcd.clear(); lcd.print("Incorrect!");
+       delay(2000);
+       lcd.clear(); lcd.print("Enter Password:");
+       enteredPassword = "";
+    }
+  }
+}
+
+void displaySensorData() {
+  [cite_start]// [cite: 162]
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("T:" + String(dht.readTemperature()) + " H:" + String(dht.readHumidity()) + "%");
+  lcd.setCursor(0, 1);
+  lcd.print("G:" + String(mq2Value) + " F:" + String(flameValue));
+}
+
+void resetSystem() {
+  [cite_start]// [cite: 162]
+  gasDetected = false;
+  buzzerActive = false;
+  digitalWrite(RELAY3, HIGH);
+  digitalWrite(BUZZER, LOW);
+  doorOpen = false;
+  doorServo.write(90);
+  enteredPassword = "";
+  lcd.clear(); lcd.print("System Reset");
+  delay(2000);
+  lcd.clear(); lcd.print("Enter Password:");
+}
