@@ -3,7 +3,7 @@ A Smart Home system using Arduino Uno, ESP8266 NodeMCU, and MIT App Inventor for
 # IoT Smart Home Automation System
 
 ## 📜 Project Description
-This project implements a comprehensive Smart Home Automation System designed to monitor environmental conditions and control home appliances remotely. [cite_start]The system ensures home security through password-protected door access and fire/gas detection systems[cite: 13].
+This project implements a comprehensive Smart Home Automation System designed to monitor environmental conditions and control home appliances remotely. The system ensures home security through password-protected door access and fire/gas detection systems[cite: 13].
 
 ## 🚀 Key Features
 * **Remote Control:** Control lights, fans, and exhaust systems via a custom Mobile App (MIT App Inventor)[cite: 14].
@@ -22,8 +22,8 @@ This project implements a comprehensive Smart Home Automation System designed to
 * **I/O:** 4x4 Keypad, 16x2 LCD Display, Buzzer
 
 ## 🔌 Circuit & Block Diagram
-![System Design](Diagrams/arduinoblockdiagram.png)
-*(Note: Upload the image from Page 4 of your report to the Diagrams folder)*
+![System Design](IOT_SMART HOME AUTOMATION/diagrams/arduinoblockdiagram.png)
+
 
 ## 💻 Tech Stack
 * **Firmware:** C++ (Arduino IDE)
