@@ -22,7 +22,7 @@ This project implements a comprehensive Smart Home Automation System designed to
 * **I/O:** 4x4 Keypad, 16x2 LCD Display, Buzzer
 
 ## 🔌 Circuit & Block Diagram
-![System Design](IOT_SMART HOME AUTOMATION/diagrams/arduinoblockdiagram.png)
+![System Design](diagrams/arduinoblockdiagram.png)
 
 
 ## 💻 Tech Stack
